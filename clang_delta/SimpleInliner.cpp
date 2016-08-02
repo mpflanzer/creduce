@@ -415,7 +415,8 @@ void SimpleInliner::generateParamStrings(void)
 
   for(Idx = 0; Idx < FD->getNumParams(); ++Idx) {
     const ParmVarDecl *PD = FD->getParamDecl(Idx);
-    std::string ParmStr = PD->getNameAsString();
+    std::string ParmStr = "__param_";
+    ParmStr += PD->getNameAsString();
     PD->getType().getAsStringInternal(ParmStr,
                                       Context->getPrintingPolicy());
     if (Idx < ArgNum) {
@@ -430,31 +431,31 @@ void SimpleInliner::generateParamStrings(void)
   }
 }
 
-void SimpleInliner::insertReturnStmt
-      (std::vector< std::pair<ReturnStmt *, int> > &SortedReturnStmts,
-       ReturnStmt *RS, int Off)
+void SimpleInliner::insertStmt
+      (std::vector< std::pair<const Stmt *, int> > &SortedStmts,
+       const Stmt *S, int Off)
 {
-  std::pair<ReturnStmt *, int> ReturnStmtOffPair(RS, Off);
-  if (SortedReturnStmts.empty()) {
-    SortedReturnStmts.push_back(ReturnStmtOffPair);
+  std::pair<const Stmt *, int> StmtOffPair(S, Off);
+  if (SortedStmts.empty()) {
+    SortedStmts.push_back(StmtOffPair);
     return;
   }
 
-  std::vector< std::pair<ReturnStmt *, int> >::iterator I, E;
-  for(I = SortedReturnStmts.begin(), E = SortedReturnStmts.end(); I != E; ++I) {
+  std::vector< std::pair<const Stmt *, int> >::iterator I, E;
+  for(I = SortedStmts.begin(), E = SortedStmts.end(); I != E; ++I) {
     int TmpOff = (*I).second;
     if (Off < TmpOff)
       break;
   }
 
   if (I == E)
-    SortedReturnStmts.push_back(ReturnStmtOffPair);
+    SortedStmts.push_back(StmtOffPair);
   else
-    SortedReturnStmts.insert(I, ReturnStmtOffPair);
+    SortedStmts.insert(I, StmtOffPair);
 }
 
-void SimpleInliner::sortReturnStmtsByOffs(const char *StartBuf,
-       std::vector< std::pair<ReturnStmt *, int> > &SortedReturnStmts)
+void SimpleInliner::sortStmtsByOffs(const char *StartBuf,
+       std::vector< std::pair<const Stmt *, int> > &SortedStmts)
 {
   for (ReturnStmtsVector::iterator I = ReturnStmts.begin(),
        E = ReturnStmts.end(); I != E; ++I) {
@@ -463,7 +464,17 @@ void SimpleInliner::sortReturnStmtsByOffs(const char *StartBuf,
     const char *RSStartBuf = SrcManager->getCharacterData(RSLocStart);
     int Off = RSStartBuf - StartBuf;
     TransAssert((Off >= 0) && "Bad Offset!");
-    insertReturnStmt(SortedReturnStmts, RS, Off);
+    insertStmt(SortedStmts, RS, Off);
+  }
+
+  for (ParmRefsVector::iterator I = ParmRefs.begin(),
+       E = ParmRefs.end(); I != E; ++I) {
+    const Stmt *S = *I;
+    SourceLocation SLocStart = S->getLocStart();
+    const char *SStartBuf = SrcManager->getCharacterData(SLocStart);
+    int Off = SStartBuf - StartBuf;
+    TransAssert((Off >= 0) && "Bad Offset!");
+    insertStmt(SortedStmts, S, Off);
   }
 }
 
@@ -479,8 +490,8 @@ void SimpleInliner::copyFunctionBody(void)
   SourceLocation StartLoc = Body->getLocStart();
   const char *StartBuf = SrcManager->getCharacterData(StartLoc);
 
-  std::vector< std::pair<ReturnStmt *, int> > SortedReturnStmts;
-  sortReturnStmtsByOffs(StartBuf, SortedReturnStmts);
+  std::vector< std::pair<const Stmt *, int> > SortedStmts;
+  sortStmtsByOffs(StartBuf, SortedStmts);
 
   // Now we start rewriting
   int Delta = 1; // skip the first { symbol
@@ -497,23 +508,29 @@ void SimpleInliner::copyFunctionBody(void)
   std::string TmpVarStr = TmpVarName + " = ";
   int TmpVarNameSize = static_cast<int>(TmpVarStr.size());
 
-  for(std::vector< std::pair<ReturnStmt *, int> >::iterator
-      I = SortedReturnStmts.begin(), E = SortedReturnStmts.end();
+  for(std::vector< std::pair<const Stmt *, int> >::iterator
+      I = SortedStmts.begin(), E = SortedStmts.end();
       I != E; ++I) {
-
-    ReturnStmt *RS = (*I).first;
-    int Off = (*I).second + Delta;
-    Expr *Exp = RS->getRetValue();
-    if (Exp) {
-      const Type *T = Exp->getType().getTypePtr();
-      if (!T->isVoidType()) {
-        FuncBodyStr.replace(Off, ReturnSZ, TmpVarStr);
-        Delta += (TmpVarNameSize - ReturnSZ);
-        continue;
+      if(auto *RS = dyn_cast<ReturnStmt>((*I).first)) {
+          int Off = (*I).second + Delta;
+          const Expr *Exp = RS->getRetValue();
+          if (Exp) {
+              const Type *T = Exp->getType().getTypePtr();
+              if (!T->isVoidType()) {
+                  FuncBodyStr.replace(Off, ReturnSZ, TmpVarStr);
+                  Delta += (TmpVarNameSize - ReturnSZ);
+                  continue;
+              }
+          }
+          FuncBodyStr.replace(Off, ReturnSZ, "");
+          Delta -= ReturnSZ;
       }
-    }
-    FuncBodyStr.replace(Off, ReturnSZ, "");
-    Delta -= ReturnSZ;
+      else if(isa<DeclRefExpr>((*I).first))
+      {
+          int Off = (*I).second + Delta;
+          FuncBodyStr.insert(Off, "__param_");
+          Delta += sizeof("__param_") - 1;
+      }
   }
 
   RewriteHelper->addStringBeforeStmt(TheStmt, FuncBodyStr, NeedParen);

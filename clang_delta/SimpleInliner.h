@@ -101,12 +101,12 @@ private:
 
   void removeFunctionBody(void);
 
-  void sortReturnStmtsByOffs(const char *StartBuf, 
-    std::vector< std::pair<clang::ReturnStmt *, int> > &SortedReturnStmts);
+  void sortStmtsByOffs(const char *StartBuf, 
+    std::vector< std::pair<const clang::Stmt *, int> > &SortedStmts);
 
-  void insertReturnStmt
-      (std::vector< std::pair<clang::ReturnStmt *, int> > &SortedReturnStmts,
-       clang::ReturnStmt *RS, int Off);
+  void insertStmt
+      (std::vector< std::pair<const clang::Stmt *, int> > &SortedStmts,
+       const clang::Stmt *S, int Off);
 
   FunctionDeclToNumCallsMap FunctionDeclNumCalls;
 
