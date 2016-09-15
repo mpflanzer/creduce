@@ -65,6 +65,12 @@ set(CLANG_LIBS
   clangARCMigrate
 )
 
+# Set platform specific libraries
+if ("${CMAKE_SYSTEM_NAME}" STREQUAL "Windows")
+  list(APPEND PLATFORM_LIBS Version)
+endif()
+
+
 add_executable(clang_delta
   ${CMAKE_BINARY_DIR}/config.h
   AggregateToScalar.cpp
@@ -218,7 +224,7 @@ add_executable(clang_delta
   git_version.h
 )
 
-target_link_libraries(clang_delta ${CLANG_LIBS} ${LLVM_LIBS})
+target_link_libraries(clang_delta ${CLANG_LIBS} ${LLVM_LIBS} ${PLATFORM_LIBS})
 
 # On Windows, we also need to link with "Version.dll" system library.
 # See <https://github.com/csmith-project/creduce/pull/126>.
